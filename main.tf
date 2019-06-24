@@ -52,12 +52,12 @@ locals {
   ## and used to conditionally add the cache bucket option to the
   ## aws_codebuild_project
   cache_def = {
-    "true" = [{
+    "true" = {
       type     = "S3"
       location = "${var.enabled == "true" && var.cache_enabled == "true" ? join("", aws_s3_bucket.cache_bucket.*.bucket) : "none" }"
-    }]
+    }
 
-    "false" = []
+    "false" = {}
   }
 
   # Final Map Selected from above
@@ -98,7 +98,7 @@ resource "aws_iam_policy" "default_cache_bucket" {
   count  = "${var.enabled == "true" && var.cache_enabled == "true" ? 1 : 0}"
   name   = "${module.label.id}-cache-bucket"
   path   = "/service-role/"
-  policy = "${data.aws_iam_policy_document.permissions_cache_bucket.json}"
+  policy = "${data.aws_iam_policy_document.permissions_cache_bucket[0].json}"
 }
 
 data "aws_iam_policy_document" "permissions" {
@@ -141,16 +141,16 @@ data "aws_iam_policy_document" "permissions_cache_bucket" {
     effect = "Allow"
 
     resources = [
-      "${aws_s3_bucket.cache_bucket.arn}",
-      "${aws_s3_bucket.cache_bucket.arn}/*",
+      "${aws_s3_bucket.cache_bucket[0].arn}",
+      "${aws_s3_bucket.cache_bucket[0].arn}/*",
     ]
   }
 }
 
 resource "aws_iam_role_policy_attachment" "default" {
   count      = "${var.enabled == "true" ? 1 : 0}"
-  policy_arn = "${aws_iam_policy.default.arn}"
-  role       = "${aws_iam_role.default.id}"
+  policy_arn = "${aws_iam_policy.default[0].arn}"
+  role       = "${aws_iam_role.default[0].id}"
 }
 
 resource "aws_iam_role_policy_attachment" "default_cache_bucket" {
@@ -162,7 +162,7 @@ resource "aws_iam_role_policy_attachment" "default_cache_bucket" {
 resource "aws_codebuild_project" "default" {
   count         = "${var.enabled == "true" ? 1 : 0}"
   name          = "${module.label.id}"
-  service_role  = "${aws_iam_role.default.arn}"
+  service_role  = "${aws_iam_role.default[0].arn}"
   badge_enabled = "${var.badge_enabled}"
   build_timeout = "${var.build_timeout}"
 
@@ -171,7 +171,10 @@ resource "aws_codebuild_project" "default" {
   }
 
   # The cache as a list with a map object inside.
-  cache = ["${local.cache}"]
+  cache = {
+    type     = "${local.cache["type"]}"
+    location = "${local.cache["location"]}"
+  }
 
   environment {
     compute_type    = "${var.build_compute_type}"
@@ -179,32 +182,43 @@ resource "aws_codebuild_project" "default" {
     type            = "LINUX_CONTAINER"
     privileged_mode = "${var.privileged_mode}"
 
-    environment_variable = [{
+    environment_variable [{
       "name"  = "AWS_REGION"
       "value" = "${signum(length(var.aws_region)) == 1 ? var.aws_region : data.aws_region.default.name}"
-    },
-      {
-        "name"  = "AWS_ACCOUNT_ID"
-        "value" = "${signum(length(var.aws_account_id)) == 1 ? var.aws_account_id : data.aws_caller_identity.default.account_id}"
-      },
-      {
-        "name"  = "IMAGE_REPO_NAME"
-        "value" = "${signum(length(var.image_repo_name)) == 1 ? var.image_repo_name : "UNSET"}"
-      },
-      {
-        "name"  = "IMAGE_TAG"
-        "value" = "${signum(length(var.image_tag)) == 1 ? var.image_tag : "latest"}"
-      },
-      {
-        "name"  = "STAGE"
-        "value" = "${signum(length(var.stage)) == 1 ? var.stage : "UNSET"}"
-      },
-      {
-        "name"  = "GITHUB_TOKEN"
-        "value" = "${signum(length(var.github_token)) == 1 ? var.github_token : "UNSET"}"
-      },
-      "${var.environment_variables}",
-    ]
+    }
+
+    environment_variable = {
+      "name"  = "AWS_ACCOUNT_ID"
+      "value" = "${signum(length(var.aws_account_id)) == 1 ? var.aws_account_id : data.aws_caller_identity.default.account_id}"
+    }
+
+    environment_variable = {
+      "name"  = "IMAGE_REPO_NAME"
+      "value" = "${signum(length(var.image_repo_name)) == 1 ? var.image_repo_name : "UNSET"}"
+    }
+
+    environment_variable = {
+      "name"  = "IMAGE_TAG"
+      "value" = "${signum(length(var.image_tag)) == 1 ? var.image_tag : "latest"}"
+    }
+
+    environment_variable = {
+      "name"  = "STAGE"
+      "value" = "${signum(length(var.stage)) == 1 ? var.stage : "UNSET"}"
+    }
+
+    environment_variable = {
+      "name"  = "GITHUB_TOKEN"
+      "value" = "${signum(length(var.github_token)) == 1 ? var.github_token : "UNSET"}"
+    }
+
+    dynamic "environment_variable" {
+      for_each = "${var.environment_variables}"
+      content {
+        name  = environment_variable.value["name"]
+        value = environment_variable.value["value"]
+      }
+    }
   }
 
   source {
